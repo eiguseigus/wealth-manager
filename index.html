@@ -18,85 +18,111 @@
   body { background: #0A0D14; color: #E8EAF0; font-family: 'Inter', sans-serif; min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s linear infinite; display: inline-block; }
-  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
+const FINNHUB_KEY = "d8p8b71r01qp954vs580d8p8b71r01qp954vs58g";
+const STORAGE_KEY = "wm_portfolios_v2";
 const COLORS = [
-  { bg: "rgba(0,212,255,0.1)",   fg: "#00D4FF" },
-  { bg: "rgba(168,85,247,0.12)", fg: "#A855F7" },
-  { bg: "rgba(251,191,36,0.1)",  fg: "#FBBF24" },
-  { bg: "rgba(0,200,100,0.1)",   fg: "#00C864" },
-  { bg: "rgba(255,107,107,0.1)", fg: "#FF6B6B" },
-  { bg: "rgba(59,130,246,0.12)", fg: "#3B82F6" },
+  { bg:"rgba(0,212,255,0.1)",   fg:"#00D4FF" },
+  { bg:"rgba(168,85,247,0.12)", fg:"#A855F7" },
+  { bg:"rgba(251,191,36,0.1)",  fg:"#FBBF24" },
+  { bg:"rgba(0,200,100,0.1)",   fg:"#00C864" },
+  { bg:"rgba(255,107,107,0.1)", fg:"#FF6B6B" },
+  { bg:"rgba(59,130,246,0.12)", fg:"#3B82F6" },
 ];
-
 const DEFAULT_PORTFOLIOS = [
-  { name: "Main",  holdings: [{ ticker: "AAPL", shares: 10 }, { ticker: "NVDA", shares: 5 }, { ticker: "GOOGL", shares: 8 }] },
-  { name: "Watch", holdings: [{ ticker: "TSLA", shares: 4 }, { ticker: "MSFT", shares: 6 }] },
+  { name:"Main",  holdings:[{ticker:"AAPL",shares:10},{ticker:"NVDA",shares:5},{ticker:"GOOGL",shares:8}] },
+  { name:"Watch", holdings:[{ticker:"TSLA",shares:4},{ticker:"MSFT",shares:6}] },
 ];
 
-const STORAGE_KEY  = "wm_portfolios_v1";
-const FINNHUB_KEY  = "d8p8b71r01qp954vs580d8p8b71r01qp954vs58g";
-
-const fmtUSD = v => v == null || isNaN(v) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
-const fmtAUD = v => v == null || isNaN(v) ? "—" : new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(v);
-const fmtJPY = v => v == null || isNaN(v) ? "—" : new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(v);
-const usdParts = v => {
-  if (v == null || isNaN(v)) return { whole: "—", dec: "" };
-  const s = fmtUSD(v);
+const fmtUSD     = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(v);
+const fmtAUD     = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD",maximumFractionDigits:0}).format(v);
+const fmtJPY     = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("ja-JP",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(v);
+const fmtUSDfull = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(v);
+const usdParts   = v => {
+  if (v==null||isNaN(v)) return {whole:"—",dec:""};
+  const s = fmtUSDfull(v);
   const i = s.lastIndexOf(".");
-  return i === -1 ? { whole: s, dec: "" } : { whole: s.slice(0, i), dec: s.slice(i) };
+  return i===-1?{whole:s,dec:""}:{whole:s.slice(0,i),dec:s.slice(i)};
 };
 
 function loadPortfolios() {
-  try { const r = localStorage.getItem(STORAGE_KEY); if (r) { const p = JSON.parse(r); if (Array.isArray(p) && p.length && p[0].holdings) return p; } } catch (e) {}
-  return DEFAULT_PORTFOLIOS.map(p => ({ ...p, holdings: [...p.holdings] }));
+  try {
+    const r = localStorage.getItem(STORAGE_KEY);
+    if (r) { const p = JSON.parse(r); if (Array.isArray(p)&&p.length&&p[0].holdings) return p; }
+  } catch(e){}
+  return DEFAULT_PORTFOLIOS.map(p=>({...p,holdings:[...p.holdings]}));
 }
-function savePortfolios(p) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {} }
+function savePortfolios(p) { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(p)); } catch(e){} }
 
 function App() {
-  const [portfolios, setPortfolios] = useState(loadPortfolios);
-  const [activeTab, setActiveTab]   = useState(0);
-  const [renamingTab, setRenamingTab] = useState(null);
-  const [tabNameDraft, setTabNameDraft] = useState("");
-  const [prices, setPrices]   = useState({});
-  const [fx, setFx]           = useState({ jpy: 156.5, aud: 1.55 });
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [updated, setUpdated] = useState(null);
-  const [editing, setEditing] = useState(null);
-  const [newTicker, setNewTicker] = useState("");
-  const [newShares, setNewShares] = useState("");
-  const [addErr, setAddErr]   = useState("");
-  const [anim, setAnim]       = useState(0);
+  const [portfolios,setPortfolios]   = useState(loadPortfolios);
+  const [activeTab,setActiveTab]     = useState(0);
+  const [renamingTab,setRenamingTab] = useState(null);
+  const [tabNameDraft,setTabNameDraft] = useState("");
+  const [prices,setPrices]           = useState({});
+  const [fx,setFx]                   = useState({jpy:156.5,aud:1.55});
+  const [fxUpdated,setFxUpdated]     = useState(null);
+  const [loading,setLoading]         = useState(false);
+  const [error,setError]             = useState(null);
+  const [updated,setUpdated]         = useState(null);
+  const [editing,setEditing]         = useState(null);
+  const [newTicker,setNewTicker]     = useState("");
+  const [newShares,setNewShares]     = useState("");
+  const [addErr,setAddErr]           = useState("");
+  const [anim,setAnim]               = useState(0);
   const shown = useRef(0);
 
-  const holdings = portfolios[activeTab]?.holdings || [];
+  const holdings    = portfolios[activeTab]?.holdings || [];
   const setHoldings = updater => {
     setPortfolios(prev => {
-      const next = prev.map((pf, i) => {
-        if (i !== activeTab) return pf;
-        const nh = typeof updater === "function" ? updater(pf.holdings) : updater;
-        return { ...pf, holdings: nh };
+      const next = prev.map((pf,i) => {
+        if (i!==activeTab) return pf;
+        const nh = typeof updater==="function" ? updater(pf.holdings) : updater;
+        return {...pf,holdings:nh};
       });
       savePortfolios(next);
       return next;
     });
   };
 
-  const fetchData = useCallback(async (list) => {
-    const tickers = [...new Set(list.map(h => h.ticker))];
+  // ── Fetch FX rates (real-time, free APIs) ──
+  const fetchFX = useCallback(async () => {
+    try {
+      const res  = await fetch("https://open.er-api.com/v6/latest/USD");
+      const data = await res.json();
+      const r    = data?.rates || {};
+      if (r.JPY && r.AUD) {
+        setFx({jpy:r.JPY, aud:r.AUD});
+        setFxUpdated(new Date());
+        return;
+      }
+    } catch(e){}
+    // Fallback: Frankfurter (ECB rates)
+    try {
+      const res  = await fetch("https://api.frankfurter.app/latest?from=USD&to=JPY,AUD");
+      const data = await res.json();
+      const r    = data?.rates || {};
+      if (r.JPY && r.AUD) {
+        setFx({jpy:r.JPY, aud:r.AUD});
+        setFxUpdated(new Date());
+      }
+    } catch(e){}
+  }, []);
+
+  // ── Fetch stock prices (Finnhub) ──
+  const fetchPrices = useCallback(async (list) => {
+    const tickers = [...new Set(list.map(h=>h.ticker))];
     if (!tickers.length) { setLoading(false); return; }
     setLoading(true); setError(null);
     try {
       const results = await Promise.all(tickers.map(async ticker => {
-        const [qRes, pRes] = await Promise.all([
+        const [qRes,pRes] = await Promise.all([
           fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_KEY}`),
           fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${ticker}&token=${FINNHUB_KEY}`),
         ]);
@@ -104,270 +130,281 @@ function App() {
         const p = await pRes.json();
         return {
           ticker,
-          price:     (q && typeof q.c === "number" && q.c > 0) ? q.c : null,
-          change:    (q && typeof q.d  === "number") ? q.d  : null,
-          changePct: (q && typeof q.dp === "number") ? q.dp : null,
-          name:      (p && p.name) ? p.name : ticker,
+          price:     (q&&typeof q.c==="number"&&q.c>0)?q.c:null,
+          change:    (q&&typeof q.d==="number")?q.d:null,
+          changePct: (q&&typeof q.dp==="number")?q.dp:null,
+          name:      (p&&p.name)?p.name:ticker,
         };
       }));
       const map = {};
-      results.forEach(r => { map[r.ticker] = r; });
-      setPrices(prev => ({ ...prev, ...map }));
-
-      try {
-        const fxRes = await fetch(`https://finnhub.io/api/v1/forex/rates?base=USD&token=${FINNHUB_KEY}`);
-        const fxData = await fxRes.json();
-        const rates = fxData?.quote || {};
-        setFx({ jpy: rates.JPY || 156.5, aud: rates.AUD || 1.55 });
-      } catch (e) {}
-
+      results.forEach(r=>{ map[r.ticker]=r; });
+      setPrices(prev=>({...prev,...map}));
       setUpdated(new Date());
-    } catch (e) {
-      setError("価格を取得できませんでした。少し待ってRefreshを押してください。");
+    } catch(e) {
+      setError("価格を取得できませんでした。Refreshを押してください。");
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    const all = [];
-    portfolios.forEach(pf => pf.holdings.forEach(h => { if (!all.find(x => x.ticker === h.ticker)) all.push(h); }));
-    fetchData(all);
+  // ── On mount: fetch everything ──
+  useEffect(()=>{
+    const allHoldings = [];
+    portfolios.forEach(pf=>pf.holdings.forEach(h=>{
+      if (!allHoldings.find(x=>x.ticker===h.ticker)) allHoldings.push(h);
+    }));
+    fetchPrices(allHoldings);
+    fetchFX();
   }, []);
 
-  const totalUSD = holdings.reduce((s, h) => { const p = prices[h.ticker]; return p && p.price ? s + p.price * h.shares : s; }, 0);
-  const totalChg = holdings.reduce((s, h) => { const p = prices[h.ticker]; return p && p.change ? s + p.change * h.shares : s; }, 0);
-  const totalChgPct = totalUSD > 0 ? (totalChg / (totalUSD - totalChg)) * 100 : 0;
-  const dir = totalChg > 0 ? "up" : totalChg < 0 ? "down" : "flat";
+  // ── Animated total ──
+  const totalUSD = holdings.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.price?s+p.price*h.shares:s; }, 0);
+  const totalChg = holdings.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.change?s+p.change*h.shares:s; }, 0);
+  const totalChgPct = totalUSD>0?(totalChg/(totalUSD-totalChg))*100:0;
+  const dir = totalChg>0?"up":totalChg<0?"down":"flat";
 
-  useEffect(() => {
-    const from = shown.current, to = totalUSD;
-    if (Math.abs(from - to) < 0.01) return;
-    const start = performance.now();
-    const step = now => {
-      const t = Math.min((now - start) / 700, 1);
-      const e = 1 - Math.pow(1 - t, 3);
-      const v = from + (to - from) * e;
-      setAnim(v); shown.current = v;
-      if (t < 1) requestAnimationFrame(step);
+  useEffect(()=>{
+    const from=shown.current, to=totalUSD;
+    if (Math.abs(from-to)<0.01) return;
+    const start=performance.now();
+    const step=now=>{
+      const t=Math.min((now-start)/700,1);
+      const e=1-Math.pow(1-t,3);
+      const v=from+(to-from)*e;
+      setAnim(v); shown.current=v;
+      if(t<1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
-  }, [totalUSD]);
+  },[totalUSD]);
 
+  // ── Handlers ──
   const switchTab = i => {
-    if (i === activeTab) return;
-    shown.current = 0; setAnim(0);
+    if (i===activeTab) return;
+    shown.current=0; setAnim(0);
     setEditing(null); setAddErr("");
     setActiveTab(i);
   };
   const commitRename = () => {
-    if (renamingTab == null) return;
-    const name = (tabNameDraft || "").trim() || portfolios[renamingTab].name;
-    setPortfolios(prev => { const next = prev.map((pf, i) => i === renamingTab ? { ...pf, name } : pf); savePortfolios(next); return next; });
+    if (renamingTab==null) return;
+    const name=(tabNameDraft||"").trim()||portfolios[renamingTab].name;
+    setPortfolios(prev=>{ const next=prev.map((pf,i)=>i===renamingTab?{...pf,name}:pf); savePortfolios(next); return next; });
     setRenamingTab(null);
   };
   const add = () => {
     setAddErr("");
-    const t = newTicker.trim().toUpperCase();
-    const s = parseFloat(newShares);
-    if (!t || t.length > 6) { setAddErr("有効なティッカーを入力してください。"); return; }
-    if (isNaN(s) || s <= 0) { setAddErr("有効な株数を入力してください。"); return; }
-    if (holdings.find(h => h.ticker === t)) { setAddErr(t + " はすでに追加されています。"); return; }
-    setHoldings(prev => [...prev, { ticker: t, shares: s }]);
+    const t=newTicker.trim().toUpperCase();
+    const s=parseFloat(newShares);
+    if (!t||t.length>6) { setAddErr("有効なティッカーを入力してください。"); return; }
+    if (isNaN(s)||s<=0) { setAddErr("有効な株数を入力してください。"); return; }
+    if (holdings.find(h=>h.ticker===t)) { setAddErr(t+" はすでに追加されています。"); return; }
+    setHoldings(prev=>[...prev,{ticker:t,shares:s}]);
     setNewTicker(""); setNewShares("");
-    fetchData([{ ticker: t, shares: s }]);
+    fetchPrices([{ticker:t,shares:s}]);
   };
-  const del = t => {
-    setHoldings(prev => prev.filter(h => h.ticker !== t));
-    if (editing && editing.ticker === t) setEditing(null);
-  };
+  const del = t => { setHoldings(prev=>prev.filter(h=>h.ticker!==t)); if(editing&&editing.ticker===t) setEditing(null); };
   const saveEdit = () => {
     if (!editing) return;
-    const s = parseFloat(editing.value);
-    if (!isNaN(s) && s > 0) setHoldings(prev => prev.map(h => h.ticker === editing.ticker ? { ...h, shares: s } : h));
+    const s=parseFloat(editing.value);
+    if (!isNaN(s)&&s>0) setHoldings(prev=>prev.map(h=>h.ticker===editing.ticker?{...h,shares:s}:h));
     setEditing(null);
   };
 
-  const S = {
-    page:  { background: "#0A0D14", minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", color: "#E8EAF0" },
-    app:   { maxWidth: 480, margin: "0 auto", minHeight: "100vh", position: "relative" },
-    glow:  { position: "fixed", top: -120, left: "50%", transform: "translateX(-50%)", width: 600, height: 300, background: "radial-gradient(ellipse, rgba(0,212,255,0.07) 0%, transparent 70%)", pointerEvents: "none" },
-    header: { padding: "48px 24px 16px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" },
-    hLabel: { fontSize: 11, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "#5A6070", marginBottom: 4 },
-    hTitle: { fontSize: 22, fontWeight: 600, color: "#C8CDD8" },
-    refresh: { display: "flex", alignItems: "center", gap: 5, background: "rgba(0,212,255,0.08)", border: "1px solid rgba(0,212,255,0.15)", color: "#00D4FF", borderRadius: 20, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" },
-    tabs:   { display: "flex", gap: 6, padding: "0 20px 4px" },
-    tab:    a => ({ flex: 1, textAlign: "center", padding: "10px 12px", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 600, border: "1px solid " + (a ? "rgba(0,212,255,0.3)" : "#1A1F2E"), background: a ? "rgba(0,212,255,0.08)" : "#0E1118", color: a ? "#00D4FF" : "#5A6070", transition: "all 0.15s", userSelect: "none" }),
-    tabIn:  { flex: 1, textAlign: "center", padding: "9px 12px", borderRadius: 12, fontSize: 13, fontWeight: 600, border: "1px solid rgba(0,212,255,0.4)", background: "#0A0D14", color: "#00D4FF", outline: "none", fontFamily: "'Inter', sans-serif" },
-    card:   { margin: "10px 20px 20px", background: "linear-gradient(135deg,#141820 0%,#0F1219 100%)", border: "1px solid #1E2330", borderRadius: 20, padding: "26px 24px 22px", position: "relative", overflow: "hidden" },
-    wLabel: { fontSize: 11, fontWeight: 500, letterSpacing: "0.16em", textTransform: "uppercase", color: "#4A5060", marginBottom: 8 },
-    wAmt:   { fontFamily: "'JetBrains Mono', monospace", fontSize: 40, fontWeight: 700, color: "#00D4FF", letterSpacing: -1, lineHeight: 1, marginBottom: 8, textShadow: "0 0 40px rgba(0,212,255,0.2)" },
-    wDec:   { fontSize: 22, fontWeight: 600, opacity: 0.7, letterSpacing: 0 },
-    sec:    { display: "flex", alignItems: "center", gap: 10, marginTop: 8 },
-    secCur: { fontFamily: "'JetBrains Mono', monospace", fontSize: 15, fontWeight: 500, color: "#8A93A8" },
-    secFlg: { fontSize: 11, fontWeight: 600, color: "#5A6378", marginRight: 1 },
-    pill:   d => ({ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 20, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, background: d==="up"?"rgba(0,200,100,0.12)":d==="down"?"rgba(255,107,107,0.12)":"rgba(90,96,112,0.2)", color: d==="up"?"#00C864":d==="down"?"#FF6B6B":"#5A6070" }),
-    updTxt: { fontSize: 10, color: "#2E3340", marginTop: 12, fontFamily: "'JetBrains Mono', monospace" },
-    secHd:  { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px 12px" },
-    secTit: { fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#4A5060" },
-    list:   { padding: "0 20px", display: "flex", flexDirection: "column", gap: 9 },
-    stock:  ed => ({ background: "#111520", border: "1px solid "+(ed?"rgba(0,212,255,0.25)":"#1A1F2E"), borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, position: "relative" }),
-    icon:   c => ({ width: 38, height: 38, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace", background: c.bg, color: c.fg }),
-    info:   { flex: 1, minWidth: 0 },
-    tkr:    { fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: "#D0D5E0", letterSpacing: "0.05em" },
-    nm:     { fontSize: 10, color: "#3E4450", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110 },
-    shRow:  { display: "flex", alignItems: "center", gap: 5, marginTop: 5 },
-    shDisp: { fontSize: 11, color: "#4A5060", cursor: "pointer", borderBottom: "1px dashed #2A3040", paddingBottom: 1, userSelect: "none" },
-    shIn:   { width: 64, background: "#0A0D14", border: "1px solid rgba(0,212,255,0.35)", borderRadius: 6, padding: "2px 7px", color: "#00D4FF", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", outline: "none" },
-    ok:     { background: "rgba(0,212,255,0.12)", border: "1px solid rgba(0,212,255,0.25)", color: "#00D4FF", borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
-    cancel: { background: "none", border: "none", color: "#3A4050", fontSize: 13, cursor: "pointer", padding: "2px 4px" },
-    right:  { textAlign: "right", flexShrink: 0, paddingRight: 14 },
-    val:    { fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: "#C8CDD8" },
-    px:     { fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#3E4450", marginTop: 2 },
-    chg:    d => ({ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, fontWeight: 600, marginTop: 3, color: d==="up"?"#00C864":d==="down"?"#FF6B6B":"#4A5060" }),
-    del:    { position: "absolute", top: 8, right: 10, background: "none", border: "none", color: "#E8EAF0", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 4, opacity: 0.6 },
-    div:    { height: 1, background: "#141820", margin: "18px 20px 14px" },
-    form:   { background: "#111520", border: "1px solid #1A1F2E", borderRadius: 14, padding: 16, margin: "0 20px" },
-    fmTit:  { fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "#4A5060", marginBottom: 12 },
-    inRow:  { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 },
-    inGrp:  { display: "flex", flexDirection: "column", gap: 5 },
-    inLbl:  { fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "#3A4050" },
-    input:  { background: "#0A0D14", border: "1px solid #1E2330", borderRadius: 8, padding: "9px 12px", color: "#C8CDD8", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", width: "100%", outline: "none" },
-    addBtn: { width: "100%", background: "rgba(0,212,255,0.1)", border: "1px solid rgba(0,212,255,0.2)", borderRadius: 10, color: "#00D4FF", fontSize: 13, fontWeight: 600, padding: 11, cursor: "pointer" },
-    errMsg: { color: "#FF6B6B", fontSize: 12, marginTop: 8 },
-    empty:  { textAlign: "center", padding: "28px 20px", color: "#3A4050", fontSize: 13, lineHeight: 1.7 },
+  // ── Styles ──
+  const C = {
+    page:   {background:"#0A0D14",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",color:"#E8EAF0"},
+    app:    {maxWidth:480,margin:"0 auto",minHeight:"100vh",position:"relative"},
+    glow:   {position:"fixed",top:-120,left:"50%",transform:"translateX(-50%)",width:600,height:300,background:"radial-gradient(ellipse,rgba(0,212,255,0.07) 0%,transparent 70%)",pointerEvents:"none"},
+    hdr:    {padding:"48px 24px 16px",display:"flex",alignItems:"flex-end",justifyContent:"space-between"},
+    hLbl:   {fontSize:11,fontWeight:500,letterSpacing:"0.18em",textTransform:"uppercase",color:"#5A6070",marginBottom:4},
+    hTit:   {fontSize:22,fontWeight:600,color:"#C8CDD8"},
+    rfsh:   {display:"flex",alignItems:"center",gap:5,background:"rgba(0,212,255,0.08)",border:"1px solid rgba(0,212,255,0.15)",color:"#00D4FF",borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"},
+    tabs:   {display:"flex",gap:6,padding:"0 20px 4px"},
+    tab:    a=>({flex:1,textAlign:"center",padding:"10px 12px",borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:600,border:"1px solid "+(a?"rgba(0,212,255,0.3)":"#1A1F2E"),background:a?"rgba(0,212,255,0.08)":"#0E1118",color:a?"#00D4FF":"#5A6070",transition:"all 0.15s",userSelect:"none"}),
+    tabIn:  {flex:1,textAlign:"center",padding:"9px 12px",borderRadius:12,fontSize:13,fontWeight:600,border:"1px solid rgba(0,212,255,0.4)",background:"#0A0D14",color:"#00D4FF",outline:"none",fontFamily:"'Inter',sans-serif"},
+    card:   {margin:"10px 20px 20px",background:"linear-gradient(135deg,#141820 0%,#0F1219 100%)",border:"1px solid #1E2330",borderRadius:20,padding:"26px 24px 22px",position:"relative",overflow:"hidden"},
+    wLbl:   {fontSize:11,fontWeight:500,letterSpacing:"0.16em",textTransform:"uppercase",color:"#4A5060",marginBottom:8},
+    wAmt:   {fontFamily:"'JetBrains Mono',monospace",fontSize:40,fontWeight:700,color:"#00D4FF",letterSpacing:-1,lineHeight:1,marginBottom:8,textShadow:"0 0 40px rgba(0,212,255,0.2)"},
+    wDec:   {fontSize:22,fontWeight:600,opacity:0.7,letterSpacing:0},
+    vals:   {display:"flex",gap:0,marginTop:16},
+    valBox: {flex:1,textAlign:"center"},
+    valLbl: {fontSize:10,fontWeight:500,letterSpacing:"0.12em",textTransform:"uppercase",color:"#3A4050",marginBottom:4},
+    valNum: {fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:600,color:"#8A93A8"},
+    pill:   d=>({display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:20,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:600,background:d==="up"?"rgba(0,200,100,0.12)":d==="down"?"rgba(255,107,107,0.12)":"rgba(90,96,112,0.2)",color:d==="up"?"#00C864":d==="down"?"#FF6B6B":"#5A6070"}),
+    updTxt: {fontSize:12,color:"#6A7385",marginTop:12,fontFamily:"'JetBrains Mono',monospace"},
+    fxTxt:  {fontSize:12,color:"#6A7385",marginTop:6,fontFamily:"'JetBrains Mono',monospace"},
+    secHd:  {display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px 12px"},
+    secTit: {fontSize:11,fontWeight:600,letterSpacing:"0.14em",textTransform:"uppercase",color:"#4A5060"},
+    list:   {padding:"0 20px",display:"flex",flexDirection:"column",gap:9},
+    stk:    ed=>({background:"#111520",border:"1px solid "+(ed?"rgba(0,212,255,0.25)":"#1A1F2E"),borderRadius:14,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,position:"relative"}),
+    ico:    c=>({width:38,height:38,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,flexShrink:0,fontFamily:"'JetBrains Mono',monospace",background:c.bg,color:c.fg}),
+    info:   {flex:1,minWidth:0},
+    tkr:    {fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,color:"#D0D5E0",letterSpacing:"0.05em"},
+    nm:     {fontSize:10,color:"#3E4450",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110},
+    shRow:  {display:"flex",alignItems:"center",gap:5,marginTop:5},
+    shDsp:  {fontSize:11,color:"#4A5060",cursor:"pointer",borderBottom:"1px dashed #2A3040",paddingBottom:1,userSelect:"none"},
+    shIn:   {width:64,background:"#0A0D14",border:"1px solid rgba(0,212,255,0.35)",borderRadius:6,padding:"2px 7px",color:"#00D4FF",fontSize:12,fontFamily:"'JetBrains Mono',monospace",outline:"none"},
+    ok:     {background:"rgba(0,212,255,0.12)",border:"1px solid rgba(0,212,255,0.25)",color:"#00D4FF",borderRadius:5,padding:"2px 7px",fontSize:11,fontWeight:700,cursor:"pointer"},
+    ccl:    {background:"none",border:"none",color:"#3A4050",fontSize:13,cursor:"pointer",padding:"2px 4px"},
+    rgt:    {textAlign:"right",flexShrink:0,paddingRight:14},
+    val:    {fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:600,color:"#C8CDD8"},
+    px:     {fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"#6A7385",marginTop:2},
+    chg:    d=>({fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:600,marginTop:3,color:d==="up"?"#00C864":d==="down"?"#FF6B6B":"#6A7385"}),
+    del:    {position:"absolute",top:8,right:10,background:"none",border:"none",color:"#E8EAF0",cursor:"pointer",fontSize:16,lineHeight:1,padding:4,opacity:0.6},
+    div:    {height:1,background:"#141820",margin:"18px 20px 14px"},
+    form:   {background:"#111520",border:"1px solid #1A1F2E",borderRadius:14,padding:16,margin:"0 20px"},
+    fTit:   {fontSize:11,fontWeight:600,letterSpacing:"0.12em",textTransform:"uppercase",color:"#4A5060",marginBottom:12},
+    inRow:  {display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10},
+    inGrp:  {display:"flex",flexDirection:"column",gap:5},
+    inLbl:  {fontSize:10,fontWeight:600,letterSpacing:"0.12em",textTransform:"uppercase",color:"#3A4050"},
+    input:  {background:"#0A0D14",border:"1px solid #1E2330",borderRadius:8,padding:"9px 12px",color:"#C8CDD8",fontSize:14,fontFamily:"'JetBrains Mono',monospace",width:"100%",outline:"none"},
+    addBtn: {width:"100%",background:"rgba(0,212,255,0.1)",border:"1px solid rgba(0,212,255,0.2)",borderRadius:10,color:"#00D4FF",fontSize:13,fontWeight:600,padding:11,cursor:"pointer"},
+    err:    {color:"#FF6B6B",fontSize:12,marginTop:8},
+    empty:  {textAlign:"center",padding:"28px 20px",color:"#3A4050",fontSize:13,lineHeight:1.7},
   };
 
   return (
-    <div style={S.page}>
-      <div style={S.app}>
-        <div style={S.glow} />
+    <div style={C.page}>
+      <div style={C.app}>
+        <div style={C.glow}/>
 
-        <div style={S.header}>
+        {/* Header */}
+        <div style={C.hdr}>
           <div>
-            <div style={S.hLabel}>Wealth Manager</div>
-            <div style={S.hTitle}>{portfolios[activeTab]?.name || "Portfolio"}</div>
+            <div style={C.hLbl}>Wealth Manager</div>
+            <div style={C.hTit}>{portfolios[activeTab]?.name||"Portfolio"}</div>
           </div>
-          <button style={S.refresh} onClick={() => fetchData(holdings)} disabled={loading}>
-            <span className={loading ? "spin" : ""}>↻</span>{loading ? "Updating…" : "Refresh"}
+          <button style={C.rfsh} onClick={()=>{ fetchPrices(holdings); fetchFX(); }} disabled={loading}>
+            <span className={loading?"spin":""}>↻</span>{loading?"Updating…":"Refresh"}
           </button>
         </div>
 
-        <div style={S.tabs}>
-          {portfolios.map((pf, i) =>
-            renamingTab === i ? (
-              <input key={i} style={S.tabIn} value={tabNameDraft} autoFocus maxLength={14}
-                onChange={e => setTabNameDraft(e.target.value)}
+        {/* Tabs */}
+        <div style={C.tabs}>
+          {portfolios.map((pf,i)=>
+            renamingTab===i?(
+              <input key={i} style={C.tabIn} value={tabNameDraft} autoFocus maxLength={14}
+                onChange={e=>setTabNameDraft(e.target.value)}
                 onBlur={commitRename}
-                onKeyDown={e => { if (e.key==="Enter") commitRename(); if (e.key==="Escape") setRenamingTab(null); }} />
-            ) : (
-              <div key={i} style={S.tab(activeTab===i)}
-                onClick={() => switchTab(i)}
-                onDoubleClick={() => { setRenamingTab(i); setTabNameDraft(pf.name); }}>
+                onKeyDown={e=>{ if(e.key==="Enter")commitRename(); if(e.key==="Escape")setRenamingTab(null); }}/>
+            ):(
+              <div key={i} style={C.tab(activeTab===i)}
+                onClick={()=>switchTab(i)}
+                onDoubleClick={()=>{ setRenamingTab(i); setTabNameDraft(pf.name); }}>
                 {pf.name}
               </div>
             )
           )}
         </div>
 
-        <div style={S.card}>
-          <div style={{ content:"", position:"absolute", top:0, left:0, right:0, height:1, background:"linear-gradient(90deg,transparent,rgba(0,212,255,0.3),transparent)" }} />
-          <div style={S.wLabel}>Total Portfolio Value</div>
-          <div style={S.wAmt}>
-            {totalUSD === 0 ? "—" : <>{usdParts(anim).whole}<span style={S.wDec}>{usdParts(anim).dec}</span></>}
+        {/* Main card */}
+        <div style={C.card}>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(0,212,255,0.3),transparent)"}}/>
+          <div style={C.wLbl}>Total Portfolio Value</div>
+          <div style={C.wAmt}>
+            {totalUSD===0?"—":<>{usdParts(anim).whole}<span style={C.wDec}>{usdParts(anim).dec}</span></>}
           </div>
-          {totalUSD > 0 && (
-            <div style={S.sec}>
-              <span style={S.secCur}><span style={S.secFlg}>¥</span>{fmtJPY(anim * fx.jpy)}</span>
-              <span style={{ color: "#252A3A", fontSize: 14 }}>·</span>
-              <span style={S.secCur}><span style={S.secFlg}>A</span>{fmtAUD(anim * fx.aud)}</span>
+
+          {/* JPY / AUD */}
+          {totalUSD>0&&(
+            <div style={C.vals}>
+              <div style={C.valBox}>
+                <div style={C.valLbl}>JPY</div>
+                <div style={C.valNum}>{fmtJPY(anim*fx.jpy)}</div>
+              </div>
+              <div style={{width:1,background:"#1A2030",margin:"0 4px"}}/>
+              <div style={C.valBox}>
+                <div style={C.valLbl}>AUD</div>
+                <div style={C.valNum}>{fmtAUD(anim*fx.aud)}</div>
+              </div>
             </div>
           )}
-          {totalChg !== 0 && (
-            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={S.pill(dir)}>{dir==="up"?"▲":"▼"} {fmtUSD(Math.abs(totalChg))} ({Math.abs(totalChgPct).toFixed(2)}%)</span>
-              <span style={{ color: "#3A4050", fontSize: 11 }}>today</span>
+
+          {/* Today's change */}
+          {totalChg!==0&&(
+            <div style={{marginTop:14,display:"flex",alignItems:"center",gap:8}}>
+              <span style={C.pill(dir)}>{dir==="up"?"▲":"▼"} {fmtUSDfull(Math.abs(totalChg))} ({Math.abs(totalChgPct).toFixed(2)}%)</span>
+              <span style={{color:"#3A4050",fontSize:10}}>今日</span>
             </div>
           )}
-          {updated && <div style={S.updTxt}>Updated {updated.toLocaleTimeString("en-AU", { hour:"2-digit", minute:"2-digit", second:"2-digit" })}</div>}
+
+          {/* Updated timestamps */}
+          {updated&&<div style={C.updTxt}>株価 {updated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</div>}
+          {fxUpdated&&<div style={C.fxTxt}>為替 {fxUpdated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} (¥{fx.jpy.toFixed(2)} / A${fx.aud.toFixed(4)})</div>}
         </div>
 
-        <div style={S.secHd}><div style={S.secTit}>Holdings ({holdings.length})</div></div>
-
-        <div style={S.list}>
-          {holdings.length === 0 && <div style={S.empty}>銘柄がありません。<br />下のフォームから追加してください。</div>}
-          {holdings.map((h, i) => {
-            const p   = prices[h.ticker];
-            const c   = COLORS[i % COLORS.length];
-            const val = p && p.price ? p.price * h.shares : null;
-            const sd  = !p || !p.change ? "flat" : p.change > 0 ? "up" : "down";
-            const ed  = editing && editing.ticker === h.ticker;
-            return (
-              <div style={S.stock(ed)} key={h.ticker}>
-                <div style={S.icon(c)}>{h.ticker.slice(0,2)}</div>
-                <div style={S.info}>
-                  <div style={S.tkr}>{h.ticker}</div>
-                  <div style={S.nm}>{p && p.name ? p.name : "—"}</div>
-                  <div style={S.shRow}>
-                    {ed ? (
+        {/* Holdings */}
+        <div style={C.secHd}><div style={C.secTit}>Holdings ({holdings.length})</div></div>
+        <div style={C.list}>
+          {holdings.length===0&&<div style={C.empty}>銘柄がありません。<br/>下のフォームから追加してください。</div>}
+          {holdings.map((h,i)=>{
+            const p=prices[h.ticker];
+            const c=COLORS[i%COLORS.length];
+            const val=p&&p.price?p.price*h.shares:null;
+            const sd=!p||!p.change?"flat":p.change>0?"up":"down";
+            const ed=editing&&editing.ticker===h.ticker;
+            return(
+              <div style={C.stk(ed)} key={h.ticker}>
+                <div style={C.ico(c)}>{h.ticker.slice(0,2)}</div>
+                <div style={C.info}>
+                  <div style={C.tkr}>{h.ticker}</div>
+                  <div style={C.nm}>{p&&p.name?p.name:"—"}</div>
+                  <div style={C.shRow}>
+                    {ed?(
                       <>
-                        <input style={S.shIn} type="number" min="0.001" step="any" value={editing.value} autoFocus
-                          onChange={e => setEditing({ ...editing, value: e.target.value })}
-                          onKeyDown={e => { if (e.key==="Enter") saveEdit(); if (e.key==="Escape") setEditing(null); }} />
-                        <button style={S.ok} onClick={saveEdit}>✓</button>
-                        <button style={S.cancel} onClick={() => setEditing(null)}>✕</button>
+                        <input style={C.shIn} type="number" min="0.001" step="any" value={editing.value} autoFocus
+                          onChange={e=>setEditing({...editing,value:e.target.value})}
+                          onKeyDown={e=>{ if(e.key==="Enter")saveEdit(); if(e.key==="Escape")setEditing(null); }}/>
+                        <button style={C.ok} onClick={saveEdit}>✓</button>
+                        <button style={C.ccl} onClick={()=>setEditing(null)}>✕</button>
                       </>
-                    ) : (
-                      <span style={S.shDisp} onClick={() => setEditing({ ticker: h.ticker, value: String(h.shares) })}>
+                    ):(
+                      <span style={C.shDsp} onClick={()=>setEditing({ticker:h.ticker,value:String(h.shares)})}>
                         {h.shares} {h.shares===1?"share":"shares"} ✎
                       </span>
                     )}
                   </div>
                 </div>
-                <div style={S.right}>
-                  <div style={S.val}>{loading && !p ? "…" : val != null ? fmtUSD(val) : "—"}</div>
-                  <div style={S.px}>{p && p.price ? "$"+p.price.toFixed(2)+" USD" : ""}</div>
-                  <div style={S.chg(sd)}>{p && p.change != null ? (p.change>=0?"+":"")+p.change.toFixed(2)+" ("+(p.changePct>=0?"+":"")+(p.changePct!=null?p.changePct.toFixed(2):"0")+"%)": ""}</div>
+                <div style={C.rgt}>
+                  <div style={C.val}>{loading&&!p?"…":val!=null?fmtUSDfull(val):"—"}</div>
+                  <div style={C.px}>{p&&p.price?"$"+p.price.toFixed(2)+" USD":""}</div>
+                  <div style={C.chg(sd)}>{p&&p.change!=null?(p.change>=0?"+":"")+p.change.toFixed(2)+" ("+(p.changePct>=0?"+":"")+(p.changePct!=null?p.changePct.toFixed(2):"0")+"%)":""}</div>
                 </div>
-                <button style={S.del} onClick={() => del(h.ticker)}>×</button>
+                <button style={C.del} onClick={()=>del(h.ticker)}>×</button>
               </div>
             );
           })}
         </div>
 
-        {error && (
-          <div style={{ padding: "10px 20px" }}>
-            <div style={{ background:"rgba(255,107,107,0.1)", border:"1px solid rgba(255,107,107,0.2)", borderRadius:8, padding:"10px 14px", color:"#FF6B6B", fontSize:12 }}>⚠ {error}</div>
-          </div>
-        )}
+        {error&&<div style={{padding:"10px 20px"}}><div style={{background:"rgba(255,107,107,0.1)",border:"1px solid rgba(255,107,107,0.2)",borderRadius:8,padding:"10px 14px",color:"#FF6B6B",fontSize:12}}>⚠ {error}</div></div>}
 
-        <div style={S.div} />
+        <div style={C.div}/>
 
-        <div style={S.form}>
-          <div style={S.fmTit}>銘柄を追加</div>
-          <div style={S.inRow}>
-            <div style={S.inGrp}>
-              <div style={S.inLbl}>Ticker</div>
-              <input style={S.input} placeholder="例: TSLA" value={newTicker} maxLength={6}
-                onChange={e => setNewTicker(e.target.value.toUpperCase())}
-                onKeyDown={e => e.key==="Enter" && add()} />
+        {/* Add form */}
+        <div style={C.form}>
+          <div style={C.fTit}>銘柄を追加</div>
+          <div style={C.inRow}>
+            <div style={C.inGrp}>
+              <div style={C.inLbl}>Ticker</div>
+              <input style={C.input} placeholder="例: TSLA" value={newTicker} maxLength={6}
+                onChange={e=>setNewTicker(e.target.value.toUpperCase())}
+                onKeyDown={e=>e.key==="Enter"&&add()}/>
             </div>
-            <div style={S.inGrp}>
-              <div style={S.inLbl}>株数</div>
-              <input style={S.input} type="number" min="0.001" step="any" placeholder="例: 10" value={newShares}
-                onChange={e => setNewShares(e.target.value)}
-                onKeyDown={e => e.key==="Enter" && add()} />
+            <div style={C.inGrp}>
+              <div style={C.inLbl}>株数</div>
+              <input style={C.input} type="number" min="0.001" step="any" placeholder="例: 10" value={newShares}
+                onChange={e=>setNewShares(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&add()}/>
             </div>
           </div>
-          <button style={S.addBtn} onClick={add}>+ ポートフォリオに追加</button>
-          {addErr && <div style={S.errMsg}>{addErr}</div>}
+          <button style={C.addBtn} onClick={add}>+ ポートフォリオに追加</button>
+          {addErr&&<div style={C.err}>{addErr}</div>}
         </div>
 
-        <div style={{ height: 48 }} />
+        <div style={{height:48}}/>
       </div>
     </div>
   );
 }
 
-ReactDOM.render(<App />, document.getElementById("root"));
+ReactDOM.render(<App/>, document.getElementById("root"));
 </script>
 </body>
 </html>
