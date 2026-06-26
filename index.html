@@ -18,6 +18,14 @@
   body { background: #0A0D14; color: #E8EAF0; font-family: 'Inter', sans-serif; min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s linear infinite; display: inline-block; }
+  .card-wrap { perspective: 1000px; }
+  @keyframes kururinpa {
+    0%   { transform: rotateY(0deg);    }
+    50%  { transform: rotateY(90deg);   }
+    51%  { transform: rotateY(-90deg);  }
+    100% { transform: rotateY(0deg);    }
+  }
+  .kururinpa { animation: kururinpa 0.5s cubic-bezier(0.4,0,0.2,1); }
 </style>
 </head>
 <body>
@@ -25,9 +33,9 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const FINNHUB_KEY = "d8p8b71r01qp954vs580d8p8b71r01qp954vs58g";
-const STORAGE_KEY = "wm_portfolios_v2";
-const COLORS = [
+const FINNHUB_KEY  = "d8p8b71r01qp954vs580d8p8b71r01qp954vs58g";
+const STORAGE_KEY  = "wm_v3";
+const STOCK_COLORS = [
   { bg:"rgba(0,212,255,0.1)",   fg:"#00D4FF" },
   { bg:"rgba(168,85,247,0.12)", fg:"#A855F7" },
   { bg:"rgba(251,191,36,0.1)",  fg:"#FBBF24" },
@@ -35,10 +43,12 @@ const COLORS = [
   { bg:"rgba(255,107,107,0.1)", fg:"#FF6B6B" },
   { bg:"rgba(59,130,246,0.12)", fg:"#3B82F6" },
 ];
-const DEFAULT_PORTFOLIOS = [
-  { name:"Main",  holdings:[{ticker:"AAPL",shares:10},{ticker:"NVDA",shares:5},{ticker:"GOOGL",shares:8}] },
-  { name:"Watch", holdings:[{ticker:"TSLA",shares:4},{ticker:"MSFT",shares:6}] },
-];
+const DEFAULT_STATE = {
+  portfolios: [
+    { name:"Main",  stocks:[{ticker:"AAPL",shares:10},{ticker:"NVDA",shares:5},{ticker:"GOOGL",shares:8}], assets:[] },
+    { name:"Watch", stocks:[{ticker:"TSLA",shares:4},{ticker:"MSFT",shares:6}],                            assets:[] },
+  ],
+};
 
 const fmtUSD     = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(v);
 const fmtAUD     = v => v==null||isNaN(v)?"—":new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD",maximumFractionDigits:0}).format(v);
@@ -51,74 +61,81 @@ const usdParts   = v => {
   return i===-1?{whole:s,dec:""}:{whole:s.slice(0,i),dec:s.slice(i)};
 };
 
-function loadPortfolios() {
+function loadState() {
   try {
     const r = localStorage.getItem(STORAGE_KEY);
-    if (r) { const p = JSON.parse(r); if (Array.isArray(p)&&p.length&&p[0].holdings) return p; }
+    if (r) { const p = JSON.parse(r); if (p && p.portfolios) return p; }
   } catch(e){}
-  return DEFAULT_PORTFOLIOS.map(p=>({...p,holdings:[...p.holdings]}));
+  return DEFAULT_STATE;
 }
-function savePortfolios(p) { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(p)); } catch(e){} }
+function saveState(s) { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(s)); } catch(e){} }
+
+// Convert any currency to USD
+function toUSD(amount, currency, fx) {
+  if (!amount || isNaN(amount)) return 0;
+  if (currency === "USD") return amount;
+  if (currency === "JPY") return amount / fx.jpy;
+  if (currency === "AUD") return amount / fx.aud;
+  return amount;
+}
 
 function App() {
-  const [portfolios,setPortfolios]   = useState(loadPortfolios);
-  const [activeTab,setActiveTab]     = useState(0);
-  const [renamingTab,setRenamingTab] = useState(null);
-  const [tabNameDraft,setTabNameDraft] = useState("");
-  const [prices,setPrices]           = useState({});
-  const [fx,setFx]                   = useState({jpy:156.5,aud:1.55});
-  const [fxUpdated,setFxUpdated]     = useState(null);
-  const [loading,setLoading]         = useState(false);
-  const [error,setError]             = useState(null);
-  const [updated,setUpdated]         = useState(null);
-  const [editing,setEditing]         = useState(null);
-  const [newTicker,setNewTicker]     = useState("");
-  const [newShares,setNewShares]     = useState("");
-  const [addErr,setAddErr]           = useState("");
-  const [anim,setAnim]               = useState(0);
+  const [appState,setAppState]   = useState(loadState);
+  const [activeTab,setActiveTab] = useState(0);
+  const [flipping,setFlipping]   = useState(false);
+  const [prices,setPrices]       = useState({});
+  const [fx,setFx]               = useState({jpy:156.5,aud:1.55});
+  const [fxUpdated,setFxUpdated] = useState(null);
+  const [loading,setLoading]     = useState(false);
+  const [error,setError]         = useState(null);
+  const [updated,setUpdated]     = useState(null);
+  const [editStock,setEditStock] = useState(null);
+  const [newTicker,setNewTicker] = useState("");
+  const [newShares,setNewShares] = useState("");
+  const [stockErr,setStockErr]   = useState("");
+  const [newAssetName,setNewAssetName]     = useState("");
+  const [newAssetAmt,setNewAssetAmt]       = useState("");
+  const [newAssetCurrency,setNewAssetCurrency] = useState("USD");
+  const [assetErr,setAssetErr]   = useState("");
+  const [anim,setAnim]           = useState(0);
+  const [addOpen,setAddOpen]     = useState(false);
+  const [addMode,setAddMode]     = useState("stock");
   const shown = useRef(0);
 
-  const holdings    = portfolios[activeTab]?.holdings || [];
-  const setHoldings = updater => {
-    setPortfolios(prev => {
-      const next = prev.map((pf,i) => {
-        if (i!==activeTab) return pf;
-        const nh = typeof updater==="function" ? updater(pf.holdings) : updater;
-        return {...pf,holdings:nh};
-      });
-      savePortfolios(next);
+  const portfolio  = appState.portfolios[activeTab] || appState.portfolios[0];
+  const stocks     = portfolio.stocks || [];
+  const assets     = portfolio.assets || [];
+
+  const updatePortfolio = (updater) => {
+    setAppState(prev => {
+      const next = {
+        ...prev,
+        portfolios: prev.portfolios.map((pf,i) => i===activeTab ? updater(pf) : pf)
+      };
+      saveState(next);
       return next;
     });
   };
 
-  // ── Fetch FX rates (real-time, free APIs) ──
+  // ── FX fetch ──
   const fetchFX = useCallback(async () => {
     try {
       const res  = await fetch("https://open.er-api.com/v6/latest/USD");
       const data = await res.json();
-      const r    = data?.rates || {};
-      if (r.JPY && r.AUD) {
-        setFx({jpy:r.JPY, aud:r.AUD});
-        setFxUpdated(new Date());
-        return;
-      }
+      const r    = data?.rates||{};
+      if (r.JPY && r.AUD) { setFx({jpy:r.JPY,aud:r.AUD}); setFxUpdated(new Date()); return; }
     } catch(e){}
-    // Fallback: Frankfurter (ECB rates)
     try {
       const res  = await fetch("https://api.frankfurter.app/latest?from=USD&to=JPY,AUD");
       const data = await res.json();
-      const r    = data?.rates || {};
-      if (r.JPY && r.AUD) {
-        setFx({jpy:r.JPY, aud:r.AUD});
-        setFxUpdated(new Date());
-      }
+      const r    = data?.rates||{};
+      if (r.JPY && r.AUD) { setFx({jpy:r.JPY,aud:r.AUD}); setFxUpdated(new Date()); }
     } catch(e){}
   }, []);
 
-  // ── Fetch stock prices (Finnhub) ──
-  const fetchPrices = useCallback(async (list) => {
-    const tickers = [...new Set(list.map(h=>h.ticker))];
-    if (!tickers.length) { setLoading(false); return; }
+  // ── Stock price fetch ──
+  const fetchPrices = useCallback(async (tickers) => {
+    if (!tickers.length) return;
     setLoading(true); setError(null);
     try {
       const results = await Promise.all(tickers.map(async ticker => {
@@ -126,41 +143,32 @@ function App() {
           fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_KEY}`),
           fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${ticker}&token=${FINNHUB_KEY}`),
         ]);
-        const q = await qRes.json();
-        const p = await pRes.json();
-        return {
-          ticker,
-          price:     (q&&typeof q.c==="number"&&q.c>0)?q.c:null,
-          change:    (q&&typeof q.d==="number")?q.d:null,
-          changePct: (q&&typeof q.dp==="number")?q.dp:null,
-          name:      (p&&p.name)?p.name:ticker,
-        };
+        const q = await qRes.json(), p = await pRes.json();
+        return { ticker, price:(q&&q.c>0)?q.c:null, change:(q&&typeof q.d==="number")?q.d:null, changePct:(q&&typeof q.dp==="number")?q.dp:null, name:(p&&p.name)?p.name:ticker };
       }));
-      const map = {};
+      const map={};
       results.forEach(r=>{ map[r.ticker]=r; });
       setPrices(prev=>({...prev,...map}));
       setUpdated(new Date());
-    } catch(e) {
-      setError("価格を取得できませんでした。Refreshを押してください。");
-    } finally { setLoading(false); }
+    } catch(e) { setError("価格を取得できませんでした。"); }
+    finally { setLoading(false); }
   }, []);
 
-  // ── On mount: fetch everything ──
   useEffect(()=>{
-    const allHoldings = [];
-    portfolios.forEach(pf=>pf.holdings.forEach(h=>{
-      if (!allHoldings.find(x=>x.ticker===h.ticker)) allHoldings.push(h);
-    }));
-    fetchPrices(allHoldings);
+    const all = [...new Set(appState.portfolios.flatMap(pf=>(pf.stocks||[]).map(s=>s.ticker)))];
+    fetchPrices(all);
     fetchFX();
   }, []);
 
-  // ── Animated total ──
-  const totalUSD = holdings.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.price?s+p.price*h.shares:s; }, 0);
-  const totalChg = holdings.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.change?s+p.change*h.shares:s; }, 0);
+  // ── Totals ──
+  const stocksUSD = stocks.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.price?s+p.price*h.shares:s; }, 0);
+  const assetsUSD = assets.reduce((s,a)=> s + toUSD(a.amount, a.currency, fx), 0);
+  const totalUSD  = stocksUSD + assetsUSD;
+  const totalChg  = stocks.reduce((s,h)=>{ const p=prices[h.ticker]; return p&&p.change?s+p.change*h.shares:s; }, 0);
   const totalChgPct = totalUSD>0?(totalChg/(totalUSD-totalChg))*100:0;
   const dir = totalChg>0?"up":totalChg<0?"down":"flat";
 
+  // ── Animate total ──
   useEffect(()=>{
     const from=shown.current, to=totalUSD;
     if (Math.abs(from-to)<0.01) return;
@@ -175,37 +183,58 @@ function App() {
     requestAnimationFrame(step);
   },[totalUSD]);
 
-  // ── Handlers ──
-  const switchTab = i => {
-    if (i===activeTab) return;
-    shown.current=0; setAnim(0);
-    setEditing(null); setAddErr("");
-    setActiveTab(i);
+  // ── Flip tab ──
+  const [cardClass,setCardClass] = useState("");
+  const flipTab = () => {
+    if (flipping) return;
+    setFlipping(true);
+    setCardClass("kururinpa");
+    // Swap content at the midpoint (250ms)
+    setTimeout(()=>{
+      const next = (activeTab+1) % appState.portfolios.length;
+      shown.current=0; setAnim(0);
+      setEditStock(null); setStockErr(""); setAssetErr("");
+      setActiveTab(next);
+    }, 250);
+    // Remove class after animation
+    setTimeout(()=>{
+      setCardClass("");
+      setFlipping(false);
+    }, 500);
   };
-  const commitRename = () => {
-    if (renamingTab==null) return;
-    const name=(tabNameDraft||"").trim()||portfolios[renamingTab].name;
-    setPortfolios(prev=>{ const next=prev.map((pf,i)=>i===renamingTab?{...pf,name}:pf); savePortfolios(next); return next; });
-    setRenamingTab(null);
-  };
-  const add = () => {
-    setAddErr("");
+
+  // ── Stock handlers ──
+  const addStock = () => {
+    setStockErr("");
     const t=newTicker.trim().toUpperCase();
     const s=parseFloat(newShares);
-    if (!t||t.length>6) { setAddErr("有効なティッカーを入力してください。"); return; }
-    if (isNaN(s)||s<=0) { setAddErr("有効な株数を入力してください。"); return; }
-    if (holdings.find(h=>h.ticker===t)) { setAddErr(t+" はすでに追加されています。"); return; }
-    setHoldings(prev=>[...prev,{ticker:t,shares:s}]);
+    if (!t||t.length>6) { setStockErr("有効なティッカーを入力してください。"); return; }
+    if (isNaN(s)||s<=0) { setStockErr("有効な株数を入力してください。"); return; }
+    if (stocks.find(h=>h.ticker===t)) { setStockErr(t+" はすでに追加されています。"); return; }
+    updatePortfolio(pf=>({...pf,stocks:[...(pf.stocks||[]),{ticker:t,shares:s}]}));
     setNewTicker(""); setNewShares("");
-    fetchPrices([{ticker:t,shares:s}]);
+    fetchPrices([t]);
   };
-  const del = t => { setHoldings(prev=>prev.filter(h=>h.ticker!==t)); if(editing&&editing.ticker===t) setEditing(null); };
-  const saveEdit = () => {
-    if (!editing) return;
-    const s=parseFloat(editing.value);
-    if (!isNaN(s)&&s>0) setHoldings(prev=>prev.map(h=>h.ticker===editing.ticker?{...h,shares:s}:h));
-    setEditing(null);
+  const delStock = t => updatePortfolio(pf=>({...pf,stocks:(pf.stocks||[]).filter(h=>h.ticker!==t)}));
+  const saveStockEdit = () => {
+    if (!editStock) return;
+    const s=parseFloat(editStock.value);
+    if (!isNaN(s)&&s>0) updatePortfolio(pf=>({...pf,stocks:(pf.stocks||[]).map(h=>h.ticker===editStock.ticker?{...h,shares:s}:h)}));
+    setEditStock(null);
   };
+
+  // ── Asset handlers ──
+  const addAsset = () => {
+    setAssetErr("");
+    const name=newAssetName.trim();
+    const amt=parseFloat(newAssetAmt);
+    if (!name) { setAssetErr("名前を入力してください。"); return; }
+    if (isNaN(amt)||amt<=0) { setAssetErr("有効な金額を入力してください。"); return; }
+    const newAsset = { id:Date.now(), name, amount:amt, currency:newAssetCurrency };
+    updatePortfolio(pf=>({...pf,assets:[...(pf.assets||[]),newAsset]}));
+    setNewAssetName(""); setNewAssetAmt(""); setNewAssetCurrency("USD");
+  };
+  const delAsset = id => updatePortfolio(pf=>({...pf,assets:(pf.assets||[]).filter(a=>a.id!==id)}));
 
   // ── Styles ──
   const C = {
@@ -216,20 +245,25 @@ function App() {
     hLbl:   {fontSize:11,fontWeight:500,letterSpacing:"0.18em",textTransform:"uppercase",color:"#5A6070",marginBottom:4},
     hTit:   {fontSize:22,fontWeight:600,color:"#C8CDD8"},
     rfsh:   {display:"flex",alignItems:"center",gap:5,background:"rgba(0,212,255,0.08)",border:"1px solid rgba(0,212,255,0.15)",color:"#00D4FF",borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"},
-    tabs:   {display:"flex",gap:6,padding:"0 20px 4px"},
-    tab:    a=>({flex:1,textAlign:"center",padding:"10px 12px",borderRadius:12,cursor:"pointer",fontSize:13,fontWeight:600,border:"1px solid "+(a?"rgba(0,212,255,0.3)":"#1A1F2E"),background:a?"rgba(0,212,255,0.08)":"#0E1118",color:a?"#00D4FF":"#5A6070",transition:"all 0.15s",userSelect:"none"}),
-    tabIn:  {flex:1,textAlign:"center",padding:"9px 12px",borderRadius:12,fontSize:13,fontWeight:600,border:"1px solid rgba(0,212,255,0.4)",background:"#0A0D14",color:"#00D4FF",outline:"none",fontFamily:"'Inter',sans-serif"},
-    card:   {margin:"10px 20px 20px",background:"linear-gradient(135deg,#141820 0%,#0F1219 100%)",border:"1px solid #1E2330",borderRadius:20,padding:"26px 24px 22px",position:"relative",overflow:"hidden"},
-    wLbl:   {fontSize:11,fontWeight:500,letterSpacing:"0.16em",textTransform:"uppercase",color:"#4A5060",marginBottom:8},
-    wAmt:   {fontFamily:"'JetBrains Mono',monospace",fontSize:40,fontWeight:700,color:"#00D4FF",letterSpacing:-1,lineHeight:1,marginBottom:8,textShadow:"0 0 40px rgba(0,212,255,0.2)"},
-    wDec:   {fontSize:22,fontWeight:600,opacity:0.7,letterSpacing:0},
-    vals:   {display:"flex",gap:0,marginTop:16},
-    valBox: {flex:1,textAlign:"center"},
-    valLbl: {fontSize:10,fontWeight:500,letterSpacing:"0.12em",textTransform:"uppercase",color:"#3A4050",marginBottom:4},
+    card:   {margin:"10px 20px 20px",background:"linear-gradient(135deg,#141820 0%,#0F1219 100%)",border:"1px solid #1E2330",borderRadius:20,padding:"22px 20px 20px",position:"relative",overflow:"hidden"},
+    flipBtn:{position:"absolute",top:14,right:14,background:"rgba(0,212,255,0.08)",border:"1px solid rgba(0,212,255,0.2)",color:"#00D4FF",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4},
+    wLbl:   {fontSize:11,fontWeight:500,letterSpacing:"0.16em",textTransform:"uppercase",color:"#4A5060",marginBottom:6},
+    wAmt:   {fontFamily:"'JetBrains Mono',monospace",fontSize:30,fontWeight:700,color:"#00D4FF",letterSpacing:-0.5,lineHeight:1,marginBottom:8,textShadow:"0 0 40px rgba(0,212,255,0.2)"},
+    wDec:   {fontSize:18,fontWeight:600,opacity:0.7,letterSpacing:0},
+    vals:   {display:"flex",gap:0,marginTop:14},
+    valBox: {flex:1},
+    valLbl: {fontSize:10,fontWeight:500,letterSpacing:"0.12em",textTransform:"uppercase",color:"#3A4050",marginBottom:3},
     valNum: {fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:600,color:"#8A93A8"},
+    fxSub:  {fontSize:11,color:"#4A5060",marginTop:3,fontFamily:"'JetBrains Mono',monospace"},
     pill:   d=>({display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:20,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:600,background:d==="up"?"rgba(0,200,100,0.12)":d==="down"?"rgba(255,107,107,0.12)":"rgba(90,96,112,0.2)",color:d==="up"?"#00C864":d==="down"?"#FF6B6B":"#5A6070"}),
-    updTxt: {fontSize:12,color:"#6A7385",marginTop:12,fontFamily:"'JetBrains Mono',monospace"},
-    fxTxt:  {fontSize:12,color:"#6A7385",marginTop:6,fontFamily:"'JetBrains Mono',monospace"},
+    updTxt: {fontSize:11,color:"#4A5060",marginTop:12,fontFamily:"'JetBrains Mono',monospace"},
+    bkRow:  {marginTop:16,paddingTop:14,borderTop:"1px solid #1A2030"},
+    bkLine: {display:"flex",alignItems:"center",gap:6,marginBottom:6},
+    bkIco:  {fontSize:13,flexShrink:0,width:18},
+    bkVals: {display:"flex",gap:0,flex:1},
+    bkCol:  w=>({width:w,flexShrink:0}),
+    bkCur:  {fontSize:9,fontWeight:700,letterSpacing:"0.08em",color:"#3A4050",display:"block",marginBottom:1},
+    bkVal:  {fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:600,color:"#6A7385",display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},
     secHd:  {display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px 12px"},
     secTit: {fontSize:11,fontWeight:600,letterSpacing:"0.14em",textTransform:"uppercase",color:"#4A5060"},
     list:   {padding:"0 20px",display:"flex",flexDirection:"column",gap:9},
@@ -248,17 +282,27 @@ function App() {
     px:     {fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"#6A7385",marginTop:2},
     chg:    d=>({fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:600,marginTop:3,color:d==="up"?"#00C864":d==="down"?"#FF6B6B":"#6A7385"}),
     del:    {position:"absolute",top:8,right:10,background:"none",border:"none",color:"#E8EAF0",cursor:"pointer",fontSize:16,lineHeight:1,padding:4,opacity:0.6},
+    // Asset card
+    ast:    {background:"#111520",border:"1px solid #1A1F2E",borderRadius:14,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,position:"relative"},
+    astIco: {width:38,height:38,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0,background:"rgba(251,191,36,0.1)"},
+    astNm:  {fontSize:13,fontWeight:600,color:"#D0D5E0"},
+    astAmt: {fontSize:11,color:"#6A7385",marginTop:2,fontFamily:"'JetBrains Mono',monospace"},
+    astVal: {fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:600,color:"#C8CDD8",textAlign:"right"},
     div:    {height:1,background:"#141820",margin:"18px 20px 14px"},
     form:   {background:"#111520",border:"1px solid #1A1F2E",borderRadius:14,padding:16,margin:"0 20px"},
     fTit:   {fontSize:11,fontWeight:600,letterSpacing:"0.12em",textTransform:"uppercase",color:"#4A5060",marginBottom:12},
     inRow:  {display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10},
+    in3:    {display:"grid",gridTemplateColumns:"1fr 1fr 80px",gap:8,marginBottom:10},
     inGrp:  {display:"flex",flexDirection:"column",gap:5},
     inLbl:  {fontSize:10,fontWeight:600,letterSpacing:"0.12em",textTransform:"uppercase",color:"#3A4050"},
     input:  {background:"#0A0D14",border:"1px solid #1E2330",borderRadius:8,padding:"9px 12px",color:"#C8CDD8",fontSize:14,fontFamily:"'JetBrains Mono',monospace",width:"100%",outline:"none"},
+    select: {background:"#0A0D14",border:"1px solid #1E2330",borderRadius:8,padding:"9px 8px",color:"#C8CDD8",fontSize:13,fontFamily:"'JetBrains Mono',monospace",width:"100%",outline:"none"},
     addBtn: {width:"100%",background:"rgba(0,212,255,0.1)",border:"1px solid rgba(0,212,255,0.2)",borderRadius:10,color:"#00D4FF",fontSize:13,fontWeight:600,padding:11,cursor:"pointer"},
     err:    {color:"#FF6B6B",fontSize:12,marginTop:8},
-    empty:  {textAlign:"center",padding:"28px 20px",color:"#3A4050",fontSize:13,lineHeight:1.7},
+    empty:  {textAlign:"center",padding:"20px",color:"#3A4050",fontSize:13,lineHeight:1.7},
   };
+
+  const nextPortfolioName = appState.portfolios[(activeTab+1)%appState.portfolios.length]?.name;
 
   return (
     <div style={C.page}>
@@ -269,50 +313,43 @@ function App() {
         <div style={C.hdr}>
           <div>
             <div style={C.hLbl}>Wealth Manager</div>
-            <div style={C.hTit}>{portfolios[activeTab]?.name||"Portfolio"}</div>
+            <div style={C.hTit}>{portfolio.name}</div>
           </div>
-          <button style={C.rfsh} onClick={()=>{ fetchPrices(holdings); fetchFX(); }} disabled={loading}>
+          <button style={C.rfsh} onClick={()=>{ fetchPrices(stocks.map(s=>s.ticker)); fetchFX(); }} disabled={loading}>
             <span className={loading?"spin":""}>↻</span>{loading?"Updating…":"Refresh"}
           </button>
         </div>
 
-        {/* Tabs */}
-        <div style={C.tabs}>
-          {portfolios.map((pf,i)=>
-            renamingTab===i?(
-              <input key={i} style={C.tabIn} value={tabNameDraft} autoFocus maxLength={14}
-                onChange={e=>setTabNameDraft(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={e=>{ if(e.key==="Enter")commitRename(); if(e.key==="Escape")setRenamingTab(null); }}/>
-            ):(
-              <div key={i} style={C.tab(activeTab===i)}
-                onClick={()=>switchTab(i)}
-                onDoubleClick={()=>{ setRenamingTab(i); setTabNameDraft(pf.name); }}>
-                {pf.name}
-              </div>
-            )
-          )}
-        </div>
-
         {/* Main card */}
-        <div style={C.card}>
+        <div className="card-wrap">
+        <div style={C.card} className={cardClass}>
           <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(0,212,255,0.3),transparent)"}}/>
+
+          {/* Flip button */}
+          <button style={C.flipBtn} onClick={flipTab} title={nextPortfolioName}>
+            ⇄
+          </button>
+
           <div style={C.wLbl}>Total Portfolio Value</div>
           <div style={C.wAmt}>
             {totalUSD===0?"—":<>{usdParts(anim).whole}<span style={C.wDec}>{usdParts(anim).dec}</span></>}
           </div>
 
-          {/* JPY / AUD */}
+
+
+          {/* JPY / AUD with FX rate below each */}
           {totalUSD>0&&(
             <div style={C.vals}>
               <div style={C.valBox}>
                 <div style={C.valLbl}>JPY</div>
                 <div style={C.valNum}>{fmtJPY(anim*fx.jpy)}</div>
+                <div style={C.fxSub}>¥{fx.jpy.toFixed(2)}/USD</div>
               </div>
-              <div style={{width:1,background:"#1A2030",margin:"0 4px"}}/>
+              <div style={{width:1,background:"#1A2030",margin:"0 12px"}}/>
               <div style={C.valBox}>
                 <div style={C.valLbl}>AUD</div>
                 <div style={C.valNum}>{fmtAUD(anim*fx.aud)}</div>
+                <div style={C.fxSub}>A${fx.aud.toFixed(4)}/USD</div>
               </div>
             </div>
           )}
@@ -325,21 +362,44 @@ function App() {
             </div>
           )}
 
-          {/* Updated timestamps */}
-          {updated&&<div style={C.updTxt}>株価 {updated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</div>}
-          {fxUpdated&&<div style={C.fxTxt}>為替 {fxUpdated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} (¥{fx.jpy.toFixed(2)} / A${fx.aud.toFixed(4)})</div>}
+          {/* Breakdown at bottom */}
+          {totalUSD>0&&(
+            <div style={C.bkRow}>
+              {[{ico:"📈",usd:stocksUSD},{ico:"💰",usd:assetsUSD}].map((row,i)=>(
+                <div style={C.bkLine} key={i}>
+                  <span style={C.bkIco}>{row.ico}</span>
+                  <div style={C.bkVals}>
+                    <div style={C.bkCol("80px")}>
+                      <span style={C.bkCur}>USD</span>
+                      <span style={C.bkVal}>{fmtUSD(row.usd)}</span>
+                    </div>
+                    <div style={C.bkCol("100px")}>
+                      <span style={C.bkCur}>JPY</span>
+                      <span style={C.bkVal}>{fmtJPY(row.usd*fx.jpy)}</span>
+                    </div>
+                    <div style={C.bkCol("80px")}>
+                      <span style={C.bkCur}>AUD</span>
+                      <span style={C.bkVal}>{fmtAUD(row.usd*fx.aud)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {updated&&<div style={C.updTxt}>株価 {updated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} {fxUpdated?"· 為替 "+fxUpdated.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):""}</div>}
         </div>
+        </div>{/* card-wrap */}
 
-        {/* Holdings */}
-        <div style={C.secHd}><div style={C.secTit}>Holdings ({holdings.length})</div></div>
+        {/* ── Stocks ── */}
+        <div style={C.secHd}><div style={C.secTit}>株式 ({stocks.length})</div></div>
         <div style={C.list}>
-          {holdings.length===0&&<div style={C.empty}>銘柄がありません。<br/>下のフォームから追加してください。</div>}
-          {holdings.map((h,i)=>{
+          {stocks.length===0&&<div style={C.empty}>銘柄がありません。</div>}
+          {stocks.map((h,i)=>{
             const p=prices[h.ticker];
-            const c=COLORS[i%COLORS.length];
+            const c=STOCK_COLORS[i%STOCK_COLORS.length];
             const val=p&&p.price?p.price*h.shares:null;
             const sd=!p||!p.change?"flat":p.change>0?"up":"down";
-            const ed=editing&&editing.ticker===h.ticker;
+            const ed=editStock&&editStock.ticker===h.ticker;
             return(
               <div style={C.stk(ed)} key={h.ticker}>
                 <div style={C.ico(c)}>{h.ticker.slice(0,2)}</div>
@@ -349,15 +409,15 @@ function App() {
                   <div style={C.shRow}>
                     {ed?(
                       <>
-                        <input style={C.shIn} type="number" min="0.001" step="any" value={editing.value} autoFocus
-                          onChange={e=>setEditing({...editing,value:e.target.value})}
-                          onKeyDown={e=>{ if(e.key==="Enter")saveEdit(); if(e.key==="Escape")setEditing(null); }}/>
-                        <button style={C.ok} onClick={saveEdit}>✓</button>
-                        <button style={C.ccl} onClick={()=>setEditing(null)}>✕</button>
+                        <input style={C.shIn} type="number" min="0.001" step="any" value={editStock.value} autoFocus
+                          onChange={e=>setEditStock({...editStock,value:e.target.value})}
+                          onKeyDown={e=>{ if(e.key==="Enter")saveStockEdit(); if(e.key==="Escape")setEditStock(null); }}/>
+                        <button style={C.ok} onClick={saveStockEdit}>✓</button>
+                        <button style={C.ccl} onClick={()=>setEditStock(null)}>✕</button>
                       </>
                     ):(
-                      <span style={C.shDsp} onClick={()=>setEditing({ticker:h.ticker,value:String(h.shares)})}>
-                        {h.shares} {h.shares===1?"share":"shares"} ✎
+                      <span style={C.shDsp} onClick={()=>setEditStock({ticker:h.ticker,value:String(h.shares)})}>
+                        {h.shares} shares ✎
                       </span>
                     )}
                   </div>
@@ -367,7 +427,7 @@ function App() {
                   <div style={C.px}>{p&&p.price?"$"+p.price.toFixed(2)+" USD":""}</div>
                   <div style={C.chg(sd)}>{p&&p.change!=null?(p.change>=0?"+":"")+p.change.toFixed(2)+" ("+(p.changePct>=0?"+":"")+(p.changePct!=null?p.changePct.toFixed(2):"0")+"%)":""}</div>
                 </div>
-                <button style={C.del} onClick={()=>del(h.ticker)}>×</button>
+                <button style={C.del} onClick={()=>delStock(h.ticker)}>×</button>
               </div>
             );
           })}
@@ -375,27 +435,113 @@ function App() {
 
         {error&&<div style={{padding:"10px 20px"}}><div style={{background:"rgba(255,107,107,0.1)",border:"1px solid rgba(255,107,107,0.2)",borderRadius:8,padding:"10px 14px",color:"#FF6B6B",fontSize:12}}>⚠ {error}</div></div>}
 
-        <div style={C.div}/>
+        {/* ── Other Assets ── */}
+        <div style={{...C.div,marginTop:8}}/>
+        <div style={C.secHd}><div style={C.secTit}>その他の資産 ({assets.length})</div></div>
+        <div style={C.list}>
+          {assets.length===0&&<div style={C.empty}>資産がありません。</div>}
+          {assets.map(a=>{
+            const usdVal = toUSD(a.amount, a.currency, fx);
+            return(
+              <div style={C.ast} key={a.id}>
+                <div style={C.astIco}>💰</div>
+                <div style={C.info}>
+                  <div style={C.astNm}>{a.name}</div>
+                  <div style={C.astAmt}>
+                    {a.currency==="JPY"?fmtJPY(a.amount):a.currency==="AUD"?fmtAUD(a.amount):fmtUSDfull(a.amount)}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",paddingRight:14}}>
+                  <div style={C.astVal}>{fmtUSDfull(usdVal)}</div>
+                  <div style={{fontSize:10,color:"#4A5060",marginTop:2}}>{a.currency} → USD</div>
+                </div>
+                <button style={C.del} onClick={()=>delAsset(a.id)}>×</button>
+              </div>
+            );
+          })}
+        </div>
 
-        {/* Add form */}
-        <div style={C.form}>
-          <div style={C.fTit}>銘柄を追加</div>
-          <div style={C.inRow}>
-            <div style={C.inGrp}>
-              <div style={C.inLbl}>Ticker</div>
-              <input style={C.input} placeholder="例: TSLA" value={newTicker} maxLength={6}
-                onChange={e=>setNewTicker(e.target.value.toUpperCase())}
-                onKeyDown={e=>e.key==="Enter"&&add()}/>
+        {/* ── Unified Add Button ── */}
+        <div style={C.div}/>
+        <div style={{padding:"0 20px"}}>
+          {!addOpen&&(
+            <button
+              style={{...C.addBtn, background:"rgba(0,212,255,0.08)", transition:"all 0.2s"}}
+              onClick={()=>setAddOpen(true)}
+            >
+              + 株式・資産を追加
+            </button>
+          )}
+
+          {addOpen&&(
+            <div style={{background:"#111520",border:"1px solid #1A1F2E",borderRadius:14,padding:16}}>
+              <div style={{display:"flex",gap:6,marginBottom:16}}>
+                <button onClick={()=>setAddMode("stock")} style={{flex:1,padding:"7px 0",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(addMode==="stock"?"rgba(0,212,255,0.4)":"#1A1F2E"),background:addMode==="stock"?"rgba(0,212,255,0.1)":"transparent",color:addMode==="stock"?"#00D4FF":"#5A6070"}}>
+                  📈 株式
+                </button>
+                <button onClick={()=>setAddMode("asset")} style={{flex:1,padding:"7px 0",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid "+(addMode==="asset"?"rgba(251,191,36,0.4)":"#1A1F2E"),background:addMode==="asset"?"rgba(251,191,36,0.08)":"transparent",color:addMode==="asset"?"#FBBF24":"#5A6070"}}>
+                  💰 その他
+                </button>
+              </div>
+
+              {addMode==="stock"&&(
+                <>
+                  <div style={C.inRow}>
+                    <div style={C.inGrp}>
+                      <div style={C.inLbl}>Ticker</div>
+                      <input style={C.input} placeholder="例: TSLA" value={newTicker} maxLength={6}
+                        onChange={e=>setNewTicker(e.target.value.toUpperCase())}
+                        onKeyDown={e=>e.key==="Enter"&&addStock()}/>
+                    </div>
+                    <div style={C.inGrp}>
+                      <div style={C.inLbl}>株数</div>
+                      <input style={C.input} type="number" min="0.001" step="any" placeholder="例: 10" value={newShares}
+                        onChange={e=>setNewShares(e.target.value)}
+                        onKeyDown={e=>e.key==="Enter"&&addStock()}/>
+                    </div>
+                  </div>
+                  <button style={C.addBtn} onClick={()=>{addStock(); setStockErr(e=>{ if(!e){setAddOpen(false);} return e; });}}>+ 株式を追加</button>
+                  {stockErr&&<div style={C.err}>{stockErr}</div>}
+                </>
+              )}
+
+              {addMode==="asset"&&(
+                <>
+                  <div style={C.inGrp}>
+                    <div style={C.inLbl}>資産名</div>
+                    <input style={{...C.input,marginBottom:10}} placeholder="例: 不動産、暗号通貨、現金" value={newAssetName}
+                      onChange={e=>setNewAssetName(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&addAsset()}/>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 90px",gap:8,marginBottom:10}}>
+                    <div style={C.inGrp}>
+                      <div style={C.inLbl}>金額</div>
+                      <input style={C.input} type="number" min="0" step="any" placeholder="0" value={newAssetAmt}
+                        onChange={e=>setNewAssetAmt(e.target.value)}
+                        onKeyDown={e=>e.key==="Enter"&&addAsset()}/>
+                    </div>
+                    <div style={C.inGrp}>
+                      <div style={C.inLbl}>通貨</div>
+                      <select style={C.select} value={newAssetCurrency} onChange={e=>setNewAssetCurrency(e.target.value)}>
+                        <option value="USD">USD</option>
+                        <option value="JPY">JPY</option>
+                        <option value="AUD">AUD</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button style={{...C.addBtn,background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.2)",color:"#FBBF24"}} onClick={()=>{addAsset(); setAssetErr(e=>{ if(!e){setAddOpen(false);} return e; });}}>+ 資産を追加</button>
+                  {assetErr&&<div style={C.err}>{assetErr}</div>}
+                </>
+              )}
+
+              {/* Close button at bottom */}
+              <button
+                onClick={()=>{ setAddOpen(false); setStockErr(""); setAssetErr(""); }}
+                style={{width:"100%",marginTop:12,padding:"9px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:"1px solid #1A1F2E",background:"transparent",color:"#5A6070"}}>
+                ✕ 閉じる
+              </button>
             </div>
-            <div style={C.inGrp}>
-              <div style={C.inLbl}>株数</div>
-              <input style={C.input} type="number" min="0.001" step="any" placeholder="例: 10" value={newShares}
-                onChange={e=>setNewShares(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&add()}/>
-            </div>
-          </div>
-          <button style={C.addBtn} onClick={add}>+ ポートフォリオに追加</button>
-          {addErr&&<div style={C.err}>{addErr}</div>}
+          )}
         </div>
 
         <div style={{height:48}}/>
